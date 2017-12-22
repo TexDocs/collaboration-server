@@ -4,3 +4,8 @@ version = "0.1.0"
 authors = ["Til Blechschmidt <til@blechschmidt.de>"]
 
 [dependencies]
+websocket = "0.20.2"
+futures = "0.1.17"
+tokio-core = "0.1.11"
+log = "0.3.8"
+cargo-style-logger = { git = "https://github.com/TheMegaTB/cargo-style-logger" }
