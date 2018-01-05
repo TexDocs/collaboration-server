@@ -1,19 +1,25 @@
 use uuid::Uuid;
-use ws::{Handler, Factory, Sender, Result, Message, CloseCode, Handshake, listen};
+use ws::{Error, ErrorKind, Handler, Sender, Result as WSResult, Message, CloseCode, Handshake as WSHandshake, listen};
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::collections::HashMap;
 
-type WrappedProject = Rc<RefCell<Project>>;
+use websocket_api::identifier;
+use websocket_api::handshake::*;
+use websocket_api::project::*;
+use websocket_api::serialize;
+use websocket_api::Deserialize;
 
-struct Project {
+type WrappedProjectHandler = Rc<RefCell<ProjectHandler>>;
+
+struct ProjectHandler {
     clients: HashMap<Uuid, Sender>
 }
 
-impl Project {
-    fn new() -> Project {
-        Project {
+impl ProjectHandler {
+    fn new() -> ProjectHandler {
+        ProjectHandler {
             clients: HashMap::new()
         }
     }
@@ -36,20 +42,63 @@ impl Project {
 pub struct ClientHandler {
     id: Uuid,
     tx: Sender,
-    project: WrappedProject
+    project: WrappedProjectHandler,
+    handshake_completed: bool
+}
+
+impl ClientHandler {
+    fn process_binary_message<'a, F, T: Deserialize<'a>>(data: &'a Vec<u8>, mut processor: F)
+        -> Result<(), Error> where F : FnMut(T) -> Result<(), Error> {
+
+        match serialize::deserialize::<T>(data) {
+            Ok(deserialized_data) => processor(deserialized_data),
+            Err(_) => Err(Error::new(ErrorKind::Protocol, "Unable to deserialize data"))
+        }
+
+    }
+
+    fn handle_binary_message(&mut self, mut data: Vec<u8>) -> Result<(), Error> {
+        match data.pop() {
+			Some(id) => {
+				match id {
+					identifier::HANDSHAKE => {
+                        ClientHandler::process_binary_message(&data, |handshake: Handshake| {
+                            if handshake.protocol_version != String::from(identifier::PROTOCOL_VERSION) {
+                                let error = HandshakeError::new(String::from("Invalid protocol version"));
+                                self.tx.send(Message::binary(error.serialize()))
+                            } else {
+                                self.handshake_completed = true;
+                                let acknowledgement = HandshakeAcknowledgement::new(self.id);
+                                self.tx.send(Message::binary(acknowledgement.serialize()))
+                            }
+                        })
+					},
+                    identifier::PROJECT_REQUEST => {
+                        ClientHandler::process_binary_message(&data, |request: ProjectRequest| {
+                            self.tx.send(Message::binary(Project::mock().serialize()))
+                        })
+                    }
+					_ => Ok(())
+				}
+			},
+			_ => Ok(())
+		}
+    }
 }
 
 impl Handler for ClientHandler {
 
-    fn on_open(&mut self, _: Handshake) -> Result<()> {
+    fn on_open(&mut self, _: WSHandshake) -> WSResult<()> {
         self.project.borrow_mut().add_client(&self);
         // info!("{:?}", self.project.borrow().len());
         Ok(())
     }
 
-    fn on_message(&mut self, msg: Message) -> Result<()> {
-        // Echo the message back
-        self.tx.send(msg)
+    fn on_message(&mut self, msg: Message) -> WSResult<()> {
+        match msg {
+            Message::Text(_) => Ok(()),
+            Message::Binary(data) => self.handle_binary_message(data)
+        }
     }
 
     fn on_close(&mut self, code: CloseCode, reason: &str) {
@@ -69,13 +118,14 @@ impl Handler for ClientHandler {
 }
 
 pub fn launch_server(addr: &'static str) {
-    let project = WrappedProject::new(RefCell::new(Project::new()));
+    let project = WrappedProjectHandler::new(RefCell::new(ProjectHandler::new()));
 
     listen(addr, |tx| {
         ClientHandler {
             id: Uuid::new_v4(),
             tx: tx,
-            project: project.clone()
+            project: project.clone(),
+            handshake_completed: false
         }
     }).unwrap();
 }

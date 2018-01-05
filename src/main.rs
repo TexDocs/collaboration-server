@@ -10,13 +10,11 @@ extern crate websocket_api;
 use log::LogLevel;
 use cargo_style_logger::Logger;
 
-mod client_handler;
 mod server;
 mod git;
 
 const SOCKET_ADDR: &'static str = "0.0.0.0:1710";
 
-use ws::{listen, Sender};
 use server::launch_server;
 
 fn main() {
