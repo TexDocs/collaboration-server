@@ -104,6 +104,12 @@ impl ClientHandler {
 
     fn handle_binary_message(&mut self, mut data: Vec<u8>) -> Result<(), Error> {
         if let Some(id) = data.pop() {
+
+            if id != identifier::HANDSHAKE && !self.handshake_completed {
+                let error = HandshakeError::new(String::from("Handshake not completed"));
+                return self.tx.send(Message::binary(error.serialize()));
+            }
+
             match id {
                 identifier::HANDSHAKE => {
                     ClientHandler::process_binary_message(&data, |handshake: Handshake| {
@@ -129,7 +135,7 @@ impl ClientHandler {
                         // Send new project
                         self.tx.send(
                             match projects.join_project(&request.id, &self) {
-                                Ok(_) => Message::binary(SerializableProject::new(request.id, String::from("Unnamed")).serialize()),
+                                Ok(_) => Message::binary(SerializableProject::new(request.id, String::from("ProtoMesh")).serialize()),
                                 Err(e) => Message::binary(ProjectRequestError::new(String::from(e)).serialize())
                             }
                         )
