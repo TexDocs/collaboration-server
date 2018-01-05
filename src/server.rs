@@ -5,6 +5,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::collections::HashMap;
 
+use std::io::{Error as IOError, ErrorKind as IOErrorKind};
+
 use websocket_api::identifier;
 use websocket_api::handshake::*;
 use websocket_api::project::{ProjectRequest, ProjectRequestError, Project as SerializableProject};
@@ -96,7 +98,7 @@ impl ClientHandler {
         -> Result<(), Error> where F : FnMut(T) -> Result<(), Error> {
         match serialize::deserialize::<T>(data) {
             Ok(deserialized_data) => processor(deserialized_data),
-            Err(_) => Err(Error::new(ErrorKind::Protocol, "Unable to deserialize data"))
+            Err(_) => Err(Error::new(ErrorKind::Io(IOError::new(IOErrorKind::InvalidData, "Unable to deserialize data")), "Unable to deserialize data"))
         }
     }
 
@@ -127,7 +129,7 @@ impl ClientHandler {
                         // Send new project
                         self.tx.send(
                             match projects.join_project(&request.id, &self) {
-                                Ok(_) => Message::binary(SerializableProject::mock().serialize()),
+                                Ok(_) => Message::binary(SerializableProject::new(request.id, String::from("Unnamed")).serialize()),
                                 Err(e) => Message::binary(ProjectRequestError::new(String::from(e)).serialize())
                             }
                         )
