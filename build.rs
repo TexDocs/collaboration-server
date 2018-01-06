@@ -36,4 +36,5 @@ fn main() {
     ).unwrap();
     f.write_all(hash.as_slice()).unwrap();
     f.write_all("\";".to_string().as_bytes()).unwrap();
+    f.write_all("\n".to_string().as_bytes()).unwrap();
 }
