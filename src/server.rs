@@ -1,5 +1,6 @@
 use uuid::Uuid;
-use ws::{Error, ErrorKind, Handler, Sender, Result as WSResult, Message, CloseCode, Handshake as WSHandshake, listen};
+use ws::{listen, CloseCode, Error, ErrorKind, Handler, Handshake as WSHandshake, Message,
+         Result as WSResult, Sender};
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -10,7 +11,7 @@ use std::io::{Error as IOError, ErrorKind as IOErrorKind};
 use websocket_api::identifier;
 use websocket_api::handshake::*;
 use websocket_api::user::*;
-use websocket_api::project::{ProjectRequest, ProjectRequestError, Project as SerializableProject};
+use websocket_api::project::{Project as SerializableProject, ProjectRequest, ProjectRequestError};
 use websocket_api::serialize;
 use websocket_api::Deserialize;
 
@@ -29,14 +30,18 @@ impl Project {
     fn with_id(id: Uuid) -> Project {
         Project {
             id: id,
-            clients: HashMap::new()
+            clients: HashMap::new(),
         }
     }
 
     fn broadcast(&self, data: Vec<u8>) {
         for (client_id, tx) in &self.clients {
             if let Err(e) = tx.send(data.clone()) {
-                debug!("Error during broadcast to client {}: {:?}", client_id.simple().to_string(), e);
+                debug!(
+                    "Error during broadcast to client {}: {:?}",
+                    client_id.simple().to_string(),
+                    e
+                );
             }
         }
     }
@@ -46,20 +51,28 @@ impl Project {
     }
 
     fn add_client(&mut self, client: &ClientHandler) {
-        info!("Client {} joined project {}", client.id.simple().to_string(), self.id.simple().to_string());
+        info!(
+            "Client {} joined project {}",
+            client.id.simple().to_string(),
+            self.id.simple().to_string()
+        );
         self.clients.insert(client.id, client.tx.clone());
         self.broadcast(UserJoined::new(client.id).serialize());
     }
 
     fn remove_client(&mut self, id: &Uuid) {
-        info!("Client {} left project {}", id.simple().to_string(), self.id.simple().to_string());
+        info!(
+            "Client {} left project {}",
+            id.simple().to_string(),
+            self.id.simple().to_string()
+        );
         self.clients.remove(id);
         self.broadcast(UserLeft::new(id.clone()).serialize());
     }
 }
 
 struct ProjectsHandler {
-    projects: HashMap<Uuid, Project>
+    projects: HashMap<Uuid, Project>,
 }
 
 impl ProjectsHandler {
@@ -82,7 +95,11 @@ impl ProjectsHandler {
         }
     }
 
-    fn join_project(&mut self, project_id: &Uuid, client: &ClientHandler) -> Result<(), &'static str> {
+    fn join_project(
+        &mut self,
+        project_id: &Uuid,
+        client: &ClientHandler,
+    ) -> Result<(), &'static str> {
         if let Some(project) = self.projects.get_mut(project_id) {
             project.add_client(client);
             Ok(())
@@ -103,21 +120,31 @@ pub struct ClientHandler {
     tx: Sender,
     projects: WrappedProjectsHandler,
     joined_project: Option<Uuid>,
-    handshake_completed: bool
+    handshake_completed: bool,
 }
 
 impl ClientHandler {
-    fn process_binary_message<'a, F, T: Deserialize<'a>>(data: &'a Vec<u8>, mut processor: F)
-        -> Result<(), Error> where F : FnMut(T) -> Result<(), Error> {
+    fn process_binary_message<'a, F, T: Deserialize<'a>>(
+        data: &'a Vec<u8>,
+        mut processor: F,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(T) -> Result<(), Error>,
+    {
         match serialize::deserialize::<T>(data) {
             Ok(deserialized_data) => processor(deserialized_data),
-            Err(_) => Err(Error::new(ErrorKind::Io(IOError::new(IOErrorKind::InvalidData, "Unable to deserialize data")), "Unable to deserialize data"))
+            Err(_) => Err(Error::new(
+                ErrorKind::Io(IOError::new(
+                    IOErrorKind::InvalidData,
+                    "Unable to deserialize data",
+                )),
+                "Unable to deserialize data",
+            )),
         }
     }
 
     fn handle_binary_message(&mut self, mut data: Vec<u8>) -> Result<(), Error> {
         if let Some(id) = data.pop() {
-
             if id != identifier::HANDSHAKE && !self.handshake_completed {
                 let error = HandshakeError::new(String::from("Handshake not completed"));
                 return self.tx.send(Message::binary(error.serialize()));
@@ -126,8 +153,10 @@ impl ClientHandler {
             match id {
                 identifier::HANDSHAKE => {
                     ClientHandler::process_binary_message(&data, |handshake: Handshake| {
-                        if handshake.protocol_version != String::from(identifier::PROTOCOL_VERSION) {
-                            let error = HandshakeError::new(String::from("Invalid protocol version"));
+                        if handshake.protocol_version != String::from(identifier::PROTOCOL_VERSION)
+                        {
+                            let error =
+                                HandshakeError::new(String::from("Invalid protocol version"));
                             self.tx.send(Message::binary(error.serialize()))
                         } else {
                             self.handshake_completed = true;
@@ -135,7 +164,7 @@ impl ClientHandler {
                             self.tx.send(Message::binary(acknowledgement.serialize()))
                         }
                     })
-                },
+                }
                 identifier::PROJECT_REQUEST => {
                     ClientHandler::process_binary_message(&data, |request: ProjectRequest| {
                         let mut projects = self.projects.borrow_mut();
@@ -148,18 +177,25 @@ impl ClientHandler {
                         self.joined_project = Some(request.id);
 
                         // Send new project
-                        self.tx.send(
-                            match projects.join_project(&request.id, &self) {
+                        self.tx
+                            .send(match projects.join_project(&request.id, &self) {
                                 Ok(_) => {
-                                    let project = SerializableProject::new(request.id, String::from("ProtoMesh"), projects.get_connected_clients(&request.id).unwrap_or(vec![]));
+                                    let project = SerializableProject::new(
+                                        request.id,
+                                        String::from("ProtoMesh"),
+                                        projects
+                                            .get_connected_clients(&request.id)
+                                            .unwrap_or(vec![]),
+                                    );
                                     Message::binary(project.serialize())
-                                },
-                                Err(e) => Message::binary(ProjectRequestError::new(String::from(e)).serialize())
-                            }
-                        )
+                                }
+                                Err(e) => Message::binary(
+                                    ProjectRequestError::new(String::from(e)).serialize(),
+                                ),
+                            })
                     })
                 }
-                _ => Ok(())
+                _ => Ok(()),
             }
         } else {
             Ok(())
@@ -168,7 +204,6 @@ impl ClientHandler {
 }
 
 impl Handler for ClientHandler {
-
     fn on_open(&mut self, _: WSHandshake) -> WSResult<()> {
         Ok(())
     }
@@ -176,13 +211,15 @@ impl Handler for ClientHandler {
     fn on_message(&mut self, msg: Message) -> WSResult<()> {
         match msg {
             Message::Text(_) => Ok(()),
-            Message::Binary(data) => self.handle_binary_message(data)
+            Message::Binary(data) => self.handle_binary_message(data),
         }
     }
 
     fn on_close(&mut self, code: CloseCode, reason: &str) {
         if let Some(project_id) = self.joined_project {
-            self.projects.borrow_mut().leave_project(&project_id, &self.id);
+            self.projects
+                .borrow_mut()
+                .leave_project(&project_id, &self.id);
         }
 
         // The WebSocket protocol allows for a utf8 reason for the closing state after the
@@ -192,7 +229,7 @@ impl Handler for ClientHandler {
         // but let's assume that we know that `reason` is human-readable.
         match code {
             CloseCode::Normal => println!("The client is done with the connection."),
-            CloseCode::Away   => println!("The client is leaving the site."),
+            CloseCode::Away => println!("The client is leaving the site."),
             _ => println!("The client encountered an error: {} {:?}", reason, code),
         }
     }
@@ -201,13 +238,11 @@ impl Handler for ClientHandler {
 pub fn launch_server(addr: &'static str) {
     let projects = WrappedProjectsHandler::new(RefCell::new(ProjectsHandler::new()));
 
-    listen(addr, |tx| {
-        ClientHandler {
-            id: Uuid::new_v4(),
-            tx: tx,
-            projects: projects.clone(),
-            joined_project: None,
-            handshake_completed: false
-        }
+    listen(addr, |tx| ClientHandler {
+        id: Uuid::new_v4(),
+        tx: tx,
+        projects: projects.clone(),
+        joined_project: None,
+        handshake_completed: false,
     }).unwrap();
 }

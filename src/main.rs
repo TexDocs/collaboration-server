@@ -1,9 +1,9 @@
-extern crate ws;
-extern crate uuid;
+extern crate cargo_style_logger;
 #[macro_use]
 extern crate log;
-extern crate cargo_style_logger;
+extern crate uuid;
 extern crate websocket_api;
+extern crate ws;
 
 use log::LogLevel;
 use cargo_style_logger::Logger;
@@ -17,7 +17,11 @@ use server::launch_server;
 
 fn main() {
     Logger::init(LogLevel::Info);
-    info!("Collaboration server v{}-{}", env!("CARGO_PKG_VERSION"), git::COMMIT_HASH);
+    info!(
+        "Collaboration server v{}-{}",
+        env!("CARGO_PKG_VERSION"),
+        git::COMMIT_HASH
+    );
 
     launch_server(SOCKET_ADDR);
 }
