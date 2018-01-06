@@ -6,6 +6,6 @@ before_script:
   - export PATH="$PATH:$HOME/.cargo/bin"
   - (which rustfmt && cargo fmt --version) || cargo install rustfmt-nightly --force
 script:
-  - cargo fmt -- --write-mode=diff
   - cargo build
+  - cargo fmt -- --write-mode=diff
   - cargo test
