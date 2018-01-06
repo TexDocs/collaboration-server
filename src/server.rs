@@ -9,6 +9,7 @@ use std::io::{Error as IOError, ErrorKind as IOErrorKind};
 
 use websocket_api::identifier;
 use websocket_api::handshake::*;
+use websocket_api::user::*;
 use websocket_api::project::{ProjectRequest, ProjectRequestError, Project as SerializableProject};
 use websocket_api::serialize;
 use websocket_api::Deserialize;
@@ -28,8 +29,7 @@ impl Project {
     fn with_id(id: Uuid) -> Project {
         Project {
             id: id,
-            clients: HashMap::new(),
-            // current_version: String::from("\\documentclass{report}\n\n\\begin{document}\n\tHello world!\n\\end{document}")
+            clients: HashMap::new()
         }
     }
 
@@ -41,15 +41,20 @@ impl Project {
         }
     }
 
+    fn get_connected_clients(&self) -> Vec<Uuid> {
+        self.clients.keys().map(|id| id.clone()).collect()
+    }
+
     fn add_client(&mut self, client: &ClientHandler) {
         info!("Client {} joined project {}", client.id.simple().to_string(), self.id.simple().to_string());
         self.clients.insert(client.id, client.tx.clone());
+        self.broadcast(UserJoined::new(client.id).serialize());
     }
 
     fn remove_client(&mut self, id: &Uuid) {
-        self.broadcast(vec![1, 2, 3, 4, 5, 6, 42]);
         info!("Client {} left project {}", id.simple().to_string(), self.id.simple().to_string());
         self.clients.remove(id);
+        self.broadcast(UserLeft::new(id.clone()).serialize());
     }
 }
 
@@ -67,6 +72,14 @@ impl ProjectsHandler {
         projects.insert(pid2, Project::with_id(pid2));
 
         ProjectsHandler { projects }
+    }
+
+    fn get_connected_clients(&self, project_id: &Uuid) -> Result<Vec<Uuid>, &'static str> {
+        if let Some(project) = self.projects.get(project_id) {
+            Ok(project.get_connected_clients())
+        } else {
+            Err("Project does not exist!")
+        }
     }
 
     fn join_project(&mut self, project_id: &Uuid, client: &ClientHandler) -> Result<(), &'static str> {
@@ -132,10 +145,15 @@ impl ClientHandler {
                             projects.leave_project(&project_id, &self.id);
                         }
 
+                        self.joined_project = Some(request.id);
+
                         // Send new project
                         self.tx.send(
                             match projects.join_project(&request.id, &self) {
-                                Ok(_) => Message::binary(SerializableProject::new(request.id, String::from("ProtoMesh")).serialize()),
+                                Ok(_) => {
+                                    let project = SerializableProject::new(request.id, String::from("ProtoMesh"), projects.get_connected_clients(&request.id).unwrap_or(vec![]));
+                                    Message::binary(project.serialize())
+                                },
                                 Err(e) => Message::binary(ProjectRequestError::new(String::from(e)).serialize())
                             }
                         )
