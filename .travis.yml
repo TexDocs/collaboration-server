@@ -5,7 +5,13 @@ cache: cargo
 before_script:
   - export PATH="$PATH:$HOME/.cargo/bin"
   - (which rustfmt && cargo fmt --version) || cargo install rustfmt-nightly --force
-script:
-  - cargo build
-  - cargo fmt -- --write-mode=diff
-  - cargo test
+jobs:
+  include:
+    - stage: build
+      script: cargo build
+    - stage: lint
+      script:
+        - cargo build
+        - cargo fmt -- --write-mode=diff
+    - stage: test
+      script: cargo test
